@@ -1,11 +1,11 @@
 export interface Task {
   id: string;
   title: string;
-  description?: string;
-  deadline?: string;
+  description: string;
+  status: 'pending' | 'completed';
   energyLevel: 'low' | 'medium' | 'high';
   priority: 'urgent' | 'flexible';
-  status: 'pending' | 'completed';
+  deadline?: string;
   createdAt: string;
   completedAt?: string;
 }
