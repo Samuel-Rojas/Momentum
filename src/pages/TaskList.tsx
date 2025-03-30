@@ -48,35 +48,19 @@ import {
   TagLabel,
   TagCloseButton,
   useToken,
-  ButtonGroup,
-  Spacer,
+  Container,
 } from '@chakra-ui/react';
-import {
-  DndContext,
-  closestCenter,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  DragEndEvent,
-} from '@dnd-kit/core';
-import {
-  arrayMove,
-  SortableContext,
-  sortableKeyboardCoordinates,
-  verticalListSortingStrategy,
-} from '@dnd-kit/sortable';
-import { RiCheckLine, RiDeleteBin6Line, RiDraggable } from 'react-icons/ri';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, HTMLMotionProps } from 'framer-motion';
+import { DndContext, DragEndEvent, DragOverlay, closestCenter, useSensor, useSensors, PointerSensor } from '@dnd-kit/core';
+import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { useTasks } from '../utils/TaskContext';
-import TaskTimeline from '../components/task/TaskTimeline';
-import TaskStats from '../components/task/TaskStats';
 import SortableTask from '../components/task/SortableTask';
-import { FiPlus, FiSearch, FiFilter, FiX, FiCheck, FiTrash2, FiEdit2, FiCalendar, FiTag, FiList, FiBarChart2, FiClock, FiCheckSquare, FiSquare, FiArrowUp, FiArrowDown } from 'react-icons/fi';
+import { RiSearchLine, RiFilter3Line, RiAddLine } from 'react-icons/ri';
 import { useNavigate } from 'react-router-dom';
-import { Priority } from '../utils/TaskContext';
 
-const MotionBox = motion(Box);
+const MotionBox = motion(Box) as React.FC<HTMLMotionProps<"div">>;
+const MotionVStack = motion(VStack) as React.FC<HTMLMotionProps<"div">>;
+const MotionButton = motion(Button) as React.FC<HTMLMotionProps<"button">>;
 
 type View = 'list' | 'timeline' | 'stats';
 type SortBy = 'createdAt' | 'dueDate' | 'priority' | 'title';
@@ -96,198 +80,219 @@ const TaskList: React.FC = () => {
   const bgColor = useColorModeValue('white', 'gray.800');
   const borderColor = useColorModeValue('gray.200', 'gray.600');
   const textColor = useColorModeValue('gray.700', 'white');
-  const mutedColor = useColorModeValue('gray.600', 'gray.400');
+  const mutedColor = useColorModeValue('gray.600', 'gray.300');
+  const hoverBgColor = useColorModeValue('gray.50', 'gray.700');
   const gradientBg = useColorModeValue(
     'linear-gradient(135deg, #f6f8fb 0%, #ffffff 100%)',
     'linear-gradient(135deg, #2d3748 0%, #1a202c 100%)'
   );
+  const filterBgColor = useColorModeValue('gray.50', 'gray.700');
+  const filterBorderColor = useColorModeValue('gray.200', 'gray.600');
+  const filterTextColor = useColorModeValue('gray.700', 'white');
+  const filterPlaceholderColor = useColorModeValue('gray.500', 'gray.400');
+  const statBgColor = useColorModeValue('white', 'gray.700');
+  const statBorderColor = useColorModeValue('gray.200', 'gray.600');
+  const statTextColor = useColorModeValue('gray.700', 'white');
+  const statMutedColor = useColorModeValue('gray.500', 'gray.400');
 
-  const { tasks, addTask, deleteTask, toggleTaskComplete, editTask, categories, reorderTasks } = useTasks();
+  const { tasks, addTask, deleteTask, toggleTaskComplete, reorderTasks } = useTasks();
   const [view, setView] = useState<View>('list');
   const [filters, setFilters] = useState<FilterOptions>({
     search: '',
     priority: 'all',
-    category: '',
-    status: 'all',
+    category: 'all',
+    status: 'all'
   });
   const [sortBy, setSortBy] = useState<SortBy>('createdAt');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [categories] = useState(['Work', 'Personal', 'Study', 'Health', 'Shopping', 'Other']);
 
-  const sensors = useSensors(
-    useSensor(PointerSensor),
-    useSensor(KeyboardSensor)
-  );
-
-  const handleDragEnd = (event: any) => {
-    const { active, over } = event;
-    if (active.id !== over.id) {
-      const oldIndex = tasks.findIndex((task) => task.id === active.id);
-      const newIndex = tasks.findIndex((task) => task.id === over.id);
-      reorderTasks(oldIndex, newIndex);
-    }
-  };
+  const pointerSensor = useSensor(PointerSensor);
+  const sensors = useSensors(pointerSensor);
 
   const filteredTasks = useMemo(() => {
-    return tasks.filter((task) => {
-      const matchesSearch = task.title.toLowerCase().includes(filters.search.toLowerCase()) ||
-        task.description?.toLowerCase().includes(filters.search.toLowerCase());
-      const matchesPriority = filters.priority === 'all' || task.priority === filters.priority;
-      const matchesCategory = !filters.category || task.category === filters.category;
-      const matchesStatus = filters.status === 'all' || 
-        (task.completed ? filters.status === 'completed' : filters.status === 'pending');
-      return matchesSearch && matchesPriority && matchesCategory && matchesStatus;
+    return tasks.filter(task => {
+      if (filters.search && !task.title.toLowerCase().includes(filters.search.toLowerCase())) {
+        return false;
+      }
+      if (filters.priority !== 'all' && task.priority !== filters.priority) {
+        return false;
+      }
+      if (filters.category !== 'all' && task.category !== filters.category) {
+        return false;
+      }
+      if (filters.status === 'completed' && !task.completed) {
+        return false;
+      }
+      if (filters.status === 'pending' && task.completed) {
+        return false;
+      }
+      return true;
     });
   }, [tasks, filters]);
 
+  const totalTasks = tasks.length;
+  const completedTasks = tasks.filter(t => t.completed).length;
+  const completionRate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      const oldIndex = tasks.findIndex(task => task.id === active.id);
+      const newIndex = tasks.findIndex(task => task.id === over.id);
+      reorderTasks(oldIndex, newIndex);
+    }
+    setActiveId(null);
+  };
+
   const handleFilterChange = (
     field: keyof FilterOptions,
-    value: string | string[] | boolean | null
+    value: string
   ) => {
-    setFilters((prev) => ({ ...prev, [field]: value }));
+    setFilters(prev => ({
+      ...prev,
+      [field]: value
+    }));
   };
 
   return (
-    <Box maxW="1200px" mx="auto" px={4} py={8}>
-      <VStack spacing={6} align="stretch">
-        <Flex justify="space-between" align="center">
-          <Heading size="lg">Tasks</Heading>
-          <Button
-            leftIcon={<FiPlus />}
-            colorScheme="blue"
-            onClick={() => navigate('/tasks/new')}
+    <Box
+      minH="100vh"
+      bg={useColorModeValue('gray.50', 'gray.900')}
+      pt="60px"
+    >
+      <Container maxW="container.xl" py={8}>
+        <VStack spacing={8} align="stretch" maxW="1200px" mx="auto">
+          <Flex justify="space-between" align="center">
+            <Heading size="lg" color={textColor}>Tasks</Heading>
+            <Button
+              leftIcon={<RiAddLine />}
+              colorScheme="blue"
+              onClick={() => navigate('/tasks/new')}
+              size="md"
+              fontWeight="semibold"
+            >
+              Add Task
+            </Button>
+          </Flex>
+
+          <Box
+            bg={filterBgColor}
+            p={4}
+            borderRadius="lg"
+            borderWidth="1px"
+            borderColor={filterBorderColor}
           >
-            Add Task
-          </Button>
-        </Flex>
+            <VStack spacing={4} align="stretch">
+              <InputGroup>
+                <InputLeftElement pointerEvents="none">
+                  <RiSearchLine color={filterPlaceholderColor} />
+                </InputLeftElement>
+                <Input
+                  placeholder="Search tasks..."
+                  value={filters.search}
+                  onChange={(e) => handleFilterChange('search', e.target.value)}
+                  bg={bgColor}
+                  borderColor={borderColor}
+                  _hover={{ borderColor: 'blue.400' }}
+                  _focus={{ borderColor: 'blue.500' }}
+                />
+              </InputGroup>
 
-        <Box>
-          <InputGroup mb={4}>
-            <InputLeftElement pointerEvents="none">
-              <FiSearch color="gray.300" />
-            </InputLeftElement>
-            <Input
-              placeholder="Search tasks..."
-              value={filters.search}
-              onChange={(e) => setFilters({ ...filters, search: e.target.value })}
-            />
-          </InputGroup>
+              <SimpleGrid columns={{ base: 1, md: 3 }} spacing={4}>
+                <Select
+                  value={filters.priority}
+                  onChange={(e) => handleFilterChange('priority', e.target.value)}
+                  bg={bgColor}
+                  borderColor={borderColor}
+                  _hover={{ borderColor: 'blue.400' }}
+                  _focus={{ borderColor: 'blue.500' }}
+                >
+                  <option value="all">All Priorities</option>
+                  <option value="high">High</option>
+                  <option value="medium">Medium</option>
+                  <option value="low">Low</option>
+                </Select>
 
-          <HStack spacing={4} mb={4}>
-            <Select
-              value={filters.status}
-              onChange={(e) => setFilters({ ...filters, status: e.target.value })}
-              w="200px"
-            >
-              <option value="all">All Status</option>
-              <option value="pending">Pending</option>
-              <option value="completed">Completed</option>
-            </Select>
-            <Select
-              value={filters.priority}
-              onChange={(e) => setFilters({ ...filters, priority: e.target.value })}
-              w="200px"
-            >
-              <option value="all">All Priority</option>
-              <option value="high">High</option>
-              <option value="medium">Medium</option>
-              <option value="low">Low</option>
-            </Select>
-            <Select
-              value={filters.category}
-              onChange={(e) => setFilters({ ...filters, category: e.target.value })}
-              w="200px"
-            >
-              <option value="">All Categories</option>
-              {categories.map((category) => (
-                <option key={category} value={category}>
-                  {category}
-                </option>
-              ))}
-            </Select>
-          </HStack>
+                <Select
+                  value={filters.category}
+                  onChange={(e) => handleFilterChange('category', e.target.value)}
+                  bg={bgColor}
+                  borderColor={borderColor}
+                  _hover={{ borderColor: 'blue.400' }}
+                  _focus={{ borderColor: 'blue.500' }}
+                >
+                  <option value="all">All Categories</option>
+                  {categories.map((category) => (
+                    <option key={category} value={category}>
+                      {category}
+                    </option>
+                  ))}
+                </Select>
 
-          <HStack spacing={4} mb={4}>
-            <ButtonGroup size="sm" isAttached variant="outline">
-              <IconButton
-                aria-label="List view"
-                icon={<FiList />}
-                onClick={() => setView('list')}
-                colorScheme={view === 'list' ? 'blue' : 'gray'}
-              />
-              <IconButton
-                aria-label="Timeline view"
-                icon={<FiCalendar />}
-                onClick={() => setView('timeline')}
-                colorScheme={view === 'timeline' ? 'blue' : 'gray'}
-              />
-              <IconButton
-                aria-label="Stats view"
-                icon={<FiBarChart2 />}
-                onClick={() => setView('stats')}
-                colorScheme={view === 'stats' ? 'blue' : 'gray'}
-              />
-            </ButtonGroup>
-            <Spacer />
-            <HStack>
-              <Select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as SortBy)}
-                w="150px"
-                size="sm"
-              >
-                <option value="createdAt">Created Date</option>
-                <option value="dueDate">Due Date</option>
-                <option value="priority">Priority</option>
-                <option value="title">Title</option>
-              </Select>
-              <IconButton
-                aria-label="Toggle sort order"
-                icon={sortOrder === 'asc' ? <FiArrowUp /> : <FiArrowDown />}
-                onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
-                size="sm"
-                variant="ghost"
-              />
-            </HStack>
-          </HStack>
-        </Box>
-
-        {view === 'timeline' ? (
-          <TaskTimeline tasks={filteredTasks} />
-        ) : view === 'stats' ? (
-          <TaskStats tasks={filteredTasks} />
-        ) : tasks.length === 0 ? (
-          <Center py={12}>
-            <VStack spacing={4}>
-              <Text fontSize="lg" color="gray.500">
-                No tasks yet. Create your first task!
-              </Text>
-              <Button
-                leftIcon={<FiPlus />}
-                colorScheme="blue"
-                onClick={() => navigate('/tasks/new')}
-              >
-                Add Task
-              </Button>
+                <Select
+                  value={filters.status}
+                  onChange={(e) => handleFilterChange('status', e.target.value)}
+                  bg={bgColor}
+                  borderColor={borderColor}
+                  _hover={{ borderColor: 'blue.400' }}
+                  _focus={{ borderColor: 'blue.500' }}
+                >
+                  <option value="all">All Status</option>
+                  <option value="completed">Completed</option>
+                  <option value="pending">Pending</option>
+                </Select>
+              </SimpleGrid>
             </VStack>
-          </Center>
-        ) : filteredTasks.length === 0 ? (
-          <Center py={12}>
-            <Text fontSize="lg" color="gray.500">
-              No tasks match your filters
-            </Text>
-          </Center>
-        ) : (
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            onDragEnd={handleDragEnd}
-          >
-            <SortableContext
-              items={filteredTasks.map(task => task.id)}
-              strategy={verticalListSortingStrategy}
+          </Box>
+
+          <StatGroup>
+            <Stat
+              bg={statBgColor}
+              p={4}
+              borderRadius="lg"
+              borderWidth="1px"
+              borderColor={statBorderColor}
             >
-              <VStack spacing={4} align="stretch">
-                <AnimatePresence>
+              <StatLabel color={statTextColor}>Total Tasks</StatLabel>
+              <StatNumber color={statTextColor}>{filteredTasks.length}</StatNumber>
+              <StatHelpText color={statMutedColor}>
+                {filteredTasks.length === tasks.length ? 'All tasks' : 'Filtered tasks'}
+              </StatHelpText>
+            </Stat>
+
+            <Stat
+              bg={statBgColor}
+              p={4}
+              borderRadius="lg"
+              borderWidth="1px"
+              borderColor={statBorderColor}
+            >
+              <StatLabel color={statTextColor}>Completed</StatLabel>
+              <StatNumber color={statTextColor}>
+                {filteredTasks.filter((task) => task.completed).length}
+              </StatNumber>
+              <StatHelpText color={statMutedColor}>
+                {((filteredTasks.filter((task) => task.completed).length / filteredTasks.length) * 100).toFixed(1)}% completion rate
+              </StatHelpText>
+            </Stat>
+          </StatGroup>
+
+          <Box
+            bg={bgColor}
+            p={6}
+            borderRadius="lg"
+            borderWidth="1px"
+            borderColor={borderColor}
+          >
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext items={filteredTasks.map((task) => task.id)}>
+                <VStack spacing={4} align="stretch">
                   {filteredTasks.map((task) => (
                     <SortableTask
                       key={task.id}
@@ -297,12 +302,12 @@ const TaskList: React.FC = () => {
                       onEdit={(id: string) => navigate(`/tasks/edit/${id}`)}
                     />
                   ))}
-                </AnimatePresence>
-              </VStack>
-            </SortableContext>
-          </DndContext>
-        )}
-      </VStack>
+                </VStack>
+              </SortableContext>
+            </DndContext>
+          </Box>
+        </VStack>
+      </Container>
     </Box>
   );
 };

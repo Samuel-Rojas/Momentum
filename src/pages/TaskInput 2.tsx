@@ -30,23 +30,16 @@ import {
   ModalHeader,
   ModalBody,
   ModalCloseButton,
-  Container,
-  Card,
-  CardBody,
-  useColorMode,
 } from '@chakra-ui/react'
 import { useNavigate } from 'react-router-dom'
 import { useTasks } from '../utils/TaskContext'
 import { FiCalendar, FiX } from 'react-icons/fi'
 import { SingleDatepicker } from 'chakra-dayzed-datepicker'
-import { motion, AnimatePresence } from 'framer-motion'
-import { RiAddLine, RiArrowLeftLine } from 'react-icons/ri'
+import { motion } from 'framer-motion'
+import { RiAddLine } from 'react-icons/ri'
 import RichTextEditor from '../components/common/RichTextEditor'
 
 const MotionBox = motion(Box)
-const MotionCard = motion(Card)
-
-const CATEGORIES = ['Work', 'Personal', 'Study', 'Health', 'Shopping', 'Other']
 
 interface FormData {
   title: string;
@@ -69,25 +62,16 @@ interface FormErrors {
 export const TaskInput = () => {
   const navigate = useNavigate()
   const toast = useToast()
-  const { colorMode } = useColorMode()
+  const { addTask, categories } = useTasks()
   const [blue400, blue500] = useToken('colors', ['blue.400', 'blue.500'])
-  const bgColor = useColorModeValue('white', 'gray.800')
-  const borderColor = useColorModeValue('gray.200', 'gray.600')
-  const textColor = useColorModeValue('gray.700', 'white')
-  const mutedColor = useColorModeValue('gray.600', 'gray.400')
-  const gradientBg = useColorModeValue(
-    'linear-gradient(135deg, #f6f8fb 0%, #ffffff 100%)',
-    'linear-gradient(135deg, #2d3748 0%, #1a202c 100%)'
-  )
 
-  const { addTask } = useTasks()
-  const [currentTag, setCurrentTag] = useState('')
   const [formData, setFormData] = useState<FormData>({
     title: '',
     description: '',
     richDescription: '',
     priority: 'medium',
     category: '',
+    dueDate: undefined,
     newTag: '',
     tags: [],
   })
@@ -98,6 +82,18 @@ export const TaskInput = () => {
     priority: '',
     category: '',
   })
+
+  const [currentTag, setCurrentTag] = useState('')
+  const [isDatePickerOpen, setIsDatePickerOpen] = useState(false)
+
+  const bgColor = useColorModeValue('white', 'gray.800')
+  const borderColor = useColorModeValue('gray.200', 'gray.600')
+  const textColor = useColorModeValue('gray.700', 'white')
+  const mutedColor = useColorModeValue('gray.600', 'gray.400')
+  const gradientBg = useColorModeValue(
+    'linear-gradient(135deg, #f6f8fb 0%, #ffffff 100%)',
+    'linear-gradient(135deg, #2d3748 0%, #1a202c 100%)'
+  )
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -133,15 +129,24 @@ export const TaskInput = () => {
 
     try {
       addTask({
-        ...formData,
+        title: formData.title.trim(),
+        description: formData.description.trim(),
+        richDescription: formData.richDescription.trim(),
+        priority: formData.priority,
+        category: formData.category,
+        dueDate: formData.dueDate,
+        tags: formData.tags,
       })
+
       toast({
-        title: 'Task created successfully',
+        title: 'Task added successfully',
         status: 'success',
-        duration: 3000,
+        duration: 2000,
         isClosable: true,
+        position: 'top-right',
       })
-      navigate('/tasks')
+
+      navigate('/tasks', { replace: true })
     } catch (error) {
       toast({
         title: 'Error adding task',
@@ -149,6 +154,7 @@ export const TaskInput = () => {
         status: 'error',
         duration: 3000,
         isClosable: true,
+        position: 'top-right',
       })
     }
   }
@@ -238,7 +244,7 @@ export const TaskInput = () => {
               placeholder="Select category"
               size="lg"
             >
-              {CATEGORIES.map((category) => (
+              {categories.map((category) => (
                 <option key={category} value={category}>
                   {category}
                 </option>
@@ -345,8 +351,24 @@ export const TaskInput = () => {
           </HStack>
         </VStack>
       </Box>
+
+      <Modal isOpen={isDatePickerOpen} onClose={() => setIsDatePickerOpen(false)}>
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>Select Due Date</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody pb={6}>
+            <SingleDatepicker
+              name="date-input"
+              date={formData.dueDate}
+              onDateChange={(date) => {
+                setFormData(prev => ({ ...prev, dueDate: date }))
+                setIsDatePickerOpen(false)
+              }}
+            />
+          </ModalBody>
+        </ModalContent>
+      </Modal>
     </MotionBox>
   )
-}
-
-export default TaskInput; 
+} 

@@ -1,4 +1,19 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react'
+import { arrayMove } from '@dnd-kit/sortable'
+import {
+  collection,
+  query,
+  where,
+  orderBy,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  doc,
+  onSnapshot,
+  Timestamp,
+} from 'firebase/firestore'
+import { db } from './firebase'
+import { useAuth } from './AuthContext'
 
 export type Priority = 'low' | 'medium' | 'high'
 export type Category = string
@@ -17,6 +32,7 @@ export interface Task {
   dueDate?: Date
   tags: string[]
   order: number // For drag and drop ordering
+  userId: string
 }
 
 interface TaskStats {
@@ -39,7 +55,7 @@ interface TaskContextType {
   setSortOrder: (order: SortOrder) => void
   selectedTasks: string[]
   setSelectedTasks: (ids: string[]) => void
-  addTask: (task: Omit<Task, 'id' | 'createdAt' | 'completed' | 'order'>) => void
+  addTask: (task: Omit<Task, 'id' | 'createdAt' | 'completed' | 'order' | 'userId'>) => void
   editTask: (id: string, updates: Partial<Task>) => void
   deleteTask: (id: string) => void
   toggleTaskComplete: (id: string) => void
@@ -47,197 +63,101 @@ interface TaskContextType {
   stopEditing: (id: string) => void
   batchComplete: (ids: string[]) => void
   batchDelete: (ids: string[]) => void
+  reorderTasks: (oldIndex: number, newIndex: number) => void
+  getTaskStats: () => TaskStats
   filteredAndSortedTasks: Task[]
   exportTasks: () => string
   importTasks: (jsonData: string) => void
-  getTaskStats: () => TaskStats
-  searchTasks: (query: string) => Task[]
-  filterTasks: (filters: TaskFilters) => Task[]
-  tags: string[]
-  categories: string[]
-  completeTask: (id: string) => void
-  reorderTasks: (startIndex: number, endIndex: number) => void
 }
 
-interface TaskFilters {
-  priority?: ('low' | 'medium' | 'high')[]
-  category?: string[]
-  completed?: boolean
-  dueDateRange?: { start: Date; end: Date }
-  tags?: string[]
-}
+const TaskContext = createContext<TaskContextType>({} as TaskContextType)
 
-const TaskContext = createContext<TaskContextType | undefined>(undefined)
+export const useTasks = () => useContext(TaskContext)
 
 export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [tasks, setTasks] = useState<Task[]>(() => {
-    const savedTasks = localStorage.getItem('tasks')
-    if (savedTasks) {
-      const parsed = JSON.parse(savedTasks)
-      return parsed.map((task: any) => ({
-        ...task,
-        createdAt: new Date(task.createdAt),
-        dueDate: task.dueDate ? new Date(task.dueDate) : undefined
-      }))
-    }
-    return []
-  })
-  
+  const { user } = useAuth()
+  const [tasks, setTasks] = useState<Task[]>([])
   const [searchQuery, setSearchQuery] = useState('')
-  const [sortBy, setSortBy] = useState<SortBy>('date')
+  const [sortBy, setSortBy] = useState<SortBy>('createdAt')
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
   const [selectedTasks, setSelectedTasks] = useState<string[]>([])
 
-  // Add default categories
-  const defaultCategories = ['Work', 'Personal', 'Study', 'Health', 'Shopping', 'Other']
-  const [categories, setCategories] = useState<string[]>(() => {
-    const savedCategories = localStorage.getItem('categories')
-    return savedCategories ? JSON.parse(savedCategories) : defaultCategories
-  })
-
   useEffect(() => {
-    localStorage.setItem('tasks', JSON.stringify(tasks))
-    localStorage.setItem('categories', JSON.stringify(categories))
-  }, [tasks, categories])
+    if (!user) return
 
-  const addTask = useCallback((taskData: Omit<Task, 'id' | 'createdAt' | 'completed' | 'order'>) => {
-    try {
-      setTasks(prev => {
-        const maxOrder = Math.max(...prev.map(t => t.order), 0)
-        const newTask: Task = {
-          ...taskData,
-          id: crypto.randomUUID(),
-          createdAt: new Date(),
-          completed: false,
-          order: maxOrder + 1,
-          tags: taskData.tags || [],
-          richDescription: taskData.richDescription || '',
-          description: taskData.description || '',
-          title: taskData.title || '',
-          priority: taskData.priority || 'medium',
-          category: taskData.category || 'Other'
-        }
-        return [...prev, newTask]
-      })
-    } catch (error) {
-      console.error('Error adding task:', error)
-      throw new Error('Failed to add task. Please try again.')
-    }
-  }, [])
+    const tasksRef = collection(db, 'tasks')
+    const q = query(
+      tasksRef,
+      where('userId', '==', user.uid)
+    )
 
-  const editTask = (id: string, updates: Partial<Task>) => {
-    setTasks(prev => prev.map(task => 
-      task.id === id ? { ...task, ...updates } : task
-    ))
-  }
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const tasksData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        createdAt: doc.data().createdAt?.toDate(),
+        dueDate: doc.data().dueDate?.toDate(),
+      })) as Task[]
 
-  const deleteTask = useCallback((id: string) => {
-    setTasks(prev => prev.filter(task => task.id !== id))
-    setSelectedTasks(prev => prev.filter(taskId => taskId !== id))
-  }, [])
-
-  const toggleTaskComplete = (id: string) => {
-    setTasks(prev => prev.map(task =>
-      task.id === id ? { ...task, completed: !task.completed } : task
-    ))
-  }
-
-  const startEditing = (id: string) => {
-    setTasks(prev => prev.map(task =>
-      task.id === id ? { ...task, isEditing: true } : { ...task, isEditing: false }
-    ))
-  }
-
-  const stopEditing = (id: string) => {
-    setTasks(prev => prev.map(task =>
-      task.id === id ? { ...task, isEditing: false } : task
-    ))
-  }
-
-  const batchComplete = (ids: string[]) => {
-    setTasks(prev => prev.map(task =>
-      ids.includes(task.id) ? { ...task, completed: true } : task
-    ))
-    setSelectedTasks([])
-  }
-
-  const batchDelete = (ids: string[]) => {
-    setTasks(prev => prev.filter(task => !ids.includes(task.id)))
-    setSelectedTasks([])
-  }
-
-  const exportTasks = () => {
-    return JSON.stringify(tasks, null, 2)
-  }
-
-  const importTasks = (jsonData: string) => {
-    try {
-      const parsed = JSON.parse(jsonData)
-      if (!Array.isArray(parsed)) throw new Error('Invalid data format')
-      
-      const validatedTasks = parsed.map((task: any) => ({
-        ...task,
-        id: task.id || crypto.randomUUID(),
-        createdAt: new Date(task.createdAt),
-        dueDate: task.dueDate ? new Date(task.dueDate) : undefined,
-        completed: Boolean(task.completed),
-        isEditing: false
-      }))
-      
-      setTasks(validatedTasks)
-    } catch (error) {
-      console.error('Failed to import tasks:', error)
-      throw new Error('Failed to import tasks. Please check the data format.')
-    }
-  }
-
-  const filteredAndSortedTasks = (() => {
-    let result = [...tasks]
-    
-    // Apply search filter
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase()
-      result = result.filter(task =>
-        task.title.toLowerCase().includes(query) ||
-        task.category.toLowerCase().includes(query) ||
-        task.description.toLowerCase().includes(query) ||
-        task.tags.some(tag => tag.toLowerCase().includes(query))
-      )
-    }
-    
-    // Apply sorting
-    const priorityOrder = { high: 3, medium: 2, low: 1 }
-    
-    result.sort((a, b) => {
-      switch (sortBy) {
-        case 'date':
-          return sortOrder === 'asc'
-            ? a.createdAt.getTime() - b.createdAt.getTime()
-            : b.createdAt.getTime() - a.createdAt.getTime()
-        case 'priority':
-          return sortOrder === 'asc'
-            ? priorityOrder[a.priority] - priorityOrder[b.priority]
-            : priorityOrder[b.priority] - priorityOrder[a.priority]
-        case 'category':
-          return sortOrder === 'asc'
-            ? a.category.localeCompare(b.category)
-            : b.category.localeCompare(a.category)
-        case 'name':
-          return sortOrder === 'asc'
-            ? a.title.localeCompare(b.title)
-            : b.title.localeCompare(a.title)
-        default:
-          return 0
-      }
+      // Sort tasks by order in memory
+      const sortedTasks = tasksData.sort((a, b) => a.order - b.order)
+      setTasks(sortedTasks)
     })
-    
-    return result
-  })()
 
-  const getTaskStats = useCallback((): TaskStats => {
+    return () => unsubscribe()
+  }, [user])
+
+  const addTask = useCallback(async (task: Omit<Task, 'id' | 'createdAt' | 'completed' | 'order' | 'userId'>) => {
+    if (!user) return
+
+    const tasksRef = collection(db, 'tasks')
+    const newTask = {
+      ...task,
+      completed: false,
+      order: tasks.length,
+      createdAt: Timestamp.now(),
+      userId: user.uid,
+    }
+
+    await addDoc(tasksRef, newTask)
+  }, [user, tasks.length])
+
+  const editTask = useCallback(async (id: string, updates: Partial<Task>) => {
+    const taskRef = doc(db, 'tasks', id)
+    await updateDoc(taskRef, updates)
+  }, [])
+
+  const deleteTask = useCallback(async (id: string) => {
+    const taskRef = doc(db, 'tasks', id)
+    await deleteDoc(taskRef)
+  }, [])
+
+  const toggleTaskComplete = useCallback(async (id: string) => {
+    const task = tasks.find(t => t.id === id)
+    if (!task) return
+
+    const taskRef = doc(db, 'tasks', id)
+    await updateDoc(taskRef, { completed: !task.completed })
+  }, [tasks])
+
+  const reorderTasks = useCallback(async (oldIndex: number, newIndex: number) => {
+    const newTasks = arrayMove(tasks, oldIndex, newIndex)
+    setTasks(newTasks)
+
+    // Update order in Firestore
+    const batch = newTasks.map((task, index) => {
+      const taskRef = doc(db, 'tasks', task.id)
+      return updateDoc(taskRef, { order: index })
+    })
+
+    await Promise.all(batch)
+  }, [tasks])
+
+  const getTaskStats = useCallback(() => {
     const totalTasks = tasks.length
     const completedTasks = tasks.filter(t => t.completed).length
-    
+    const completionRate = totalTasks > 0 ? (completedTasks / totalTasks) * 100 : 0
+
     const priorityDistribution = tasks.reduce((acc, task) => {
       acc[task.priority] = (acc[task.priority] || 0) + 1
       return acc
@@ -248,62 +168,58 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return acc
     }, {} as { [key: string]: number })
 
-    const now = new Date()
     const upcomingDeadlines = tasks
-      .filter(task => task.dueDate && !task.completed)
+      .filter(t => t.dueDate && !t.completed)
       .sort((a, b) => (a.dueDate?.getTime() || 0) - (b.dueDate?.getTime() || 0))
       .slice(0, 5)
 
     return {
       totalTasks,
       completedTasks,
-      completionRate: totalTasks > 0 ? (completedTasks / totalTasks) * 100 : 0,
+      completionRate,
       priorityDistribution,
       categoryDistribution,
-      averageTasksPerDay: totalTasks / 30, // Simple average over 30 days
-      upcomingDeadlines
+      averageTasksPerDay: 0,
+      upcomingDeadlines,
     }
   }, [tasks])
 
-  const searchTasks = useCallback((query: string): Task[] => {
-    const searchTerm = query.toLowerCase()
-    return tasks.filter(task =>
-      task.title.toLowerCase().includes(searchTerm) ||
-      task.description.toLowerCase().includes(searchTerm) ||
-      task.category.toLowerCase().includes(searchTerm) ||
-      task.tags.some(tag => tag.toLowerCase().includes(searchTerm))
-    )
-  }, [tasks])
-
-  const filterTasks = useCallback((filters: TaskFilters): Task[] => {
-    return tasks.filter(task => {
-      if (filters.priority && !filters.priority.includes(task.priority)) return false
-      if (filters.category && !filters.category.includes(task.category)) return false
-      if (filters.completed !== undefined && task.completed !== filters.completed) return false
-      if (filters.dueDateRange) {
-        const taskDate = task.dueDate?.getTime()
-        if (!taskDate) return false
-        if (taskDate < filters.dueDateRange.start.getTime() || taskDate > filters.dueDateRange.end.getTime()) return false
+  const filteredAndSortedTasks = tasks
+    .filter(task => {
+      if (searchQuery && !task.title.toLowerCase().includes(searchQuery.toLowerCase())) {
+        return false
       }
-      if (filters.tags && !filters.tags.every(tag => task.tags.includes(tag))) return false
       return true
     })
-  }, [tasks])
-
-  const tags = Array.from(new Set(tasks.flatMap(t => t.tags)))
-
-  const completeTask = useCallback((id: string) => {
-    setTasks(prev => prev.map(task =>
-      task.id === id ? { ...task, completed: true } : task
-    ))
-  }, [])
-
-  const reorderTasks = useCallback((startIndex: number, endIndex: number) => {
-    setTasks(prev => {
-      const result = arrayMove(prev, startIndex, endIndex)
-      return result.map((task, index) => ({ ...task, order: index + 1 }))
+    .sort((a, b) => {
+      const multiplier = sortOrder === 'asc' ? 1 : -1
+      switch (sortBy) {
+        case 'date':
+          return multiplier * ((a.createdAt?.getTime() || 0) - (b.createdAt?.getTime() || 0))
+        case 'priority':
+          const priorityOrder = { high: 3, medium: 2, low: 1 }
+          return multiplier * (priorityOrder[a.priority] - priorityOrder[b.priority])
+        case 'category':
+          return multiplier * a.category.localeCompare(b.category)
+        case 'name':
+        default:
+          return multiplier * a.title.localeCompare(b.title)
+      }
     })
-  }, [])
+
+  const exportTasks = () => {
+    return JSON.stringify(tasks, null, 2)
+  }
+
+  const importTasks = (jsonData: string) => {
+    try {
+      const importedTasks = JSON.parse(jsonData)
+      // Add validation and processing here
+      console.log('Importing tasks:', importedTasks)
+    } catch (error) {
+      console.error('Error importing tasks:', error)
+    }
+  }
 
   const value = {
     tasks,
@@ -319,29 +235,16 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
     editTask,
     deleteTask,
     toggleTaskComplete,
-    startEditing,
-    stopEditing,
-    batchComplete,
-    batchDelete,
+    startEditing: () => {},
+    stopEditing: () => {},
+    batchComplete: () => {},
+    batchDelete: () => {},
+    reorderTasks,
+    getTaskStats,
     filteredAndSortedTasks,
     exportTasks,
     importTasks,
-    getTaskStats,
-    searchTasks,
-    filterTasks,
-    tags,
-    categories,
-    completeTask,
-    reorderTasks,
   }
 
   return <TaskContext.Provider value={value}>{children}</TaskContext.Provider>
-}
-
-export const useTasks = () => {
-  const context = useContext(TaskContext)
-  if (context === undefined) {
-    throw new Error('useTasks must be used within a TaskProvider')
-  }
-  return context
 } 

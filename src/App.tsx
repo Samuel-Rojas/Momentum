@@ -1,32 +1,88 @@
-import { Box } from '@chakra-ui/react'
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
-import { Welcome } from './pages/Welcome'
-import { TaskInput } from './pages/TaskInput'
-import TaskList from './pages/TaskList'
-import { TaskReview } from './pages/TaskReview'
-import { Settings } from './pages/Settings'
-import { Navbar } from './components/layout/Navbar'
-import { TaskProvider } from './utils/TaskContext'
+import React from 'react';
+import { ChakraProvider, ColorModeScript } from '@chakra-ui/react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider, useAuth } from './utils/AuthContext';
+import { TaskProvider } from './utils/TaskContext';
+import theme from './theme';
 
-function App() {
+// Pages
+import Login from './pages/Login';
+import Signup from './pages/Signup';
+import TaskList from './pages/TaskList';
+import TaskInput from './pages/TaskInput';
+import ProductivityInsights from './components/ProductivityInsights';
+import Settings from './pages/Settings';
+import { Navigation } from './components/Navigation';
+
+// Protected Route wrapper
+const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return <div>Loading...</div>;
+  }
+
+  if (!user) {
+    return <Navigate to="/login" />;
+  }
+
   return (
-    <TaskProvider>
-      <Router>
-        <Box minH="100vh" bg="gray.50">
-          <Navbar />
-          <Box as="main" pt={16}>
-            <Routes>
-              <Route path="/" element={<Welcome />} />
-              <Route path="/tasks/new" element={<TaskInput />} />
-              <Route path="/tasks" element={<TaskList />} />
-              <Route path="/review" element={<TaskReview />} />
-              <Route path="/settings" element={<Settings />} />
-            </Routes>
-          </Box>
-        </Box>
-      </Router>
-    </TaskProvider>
-  )
-}
+    <>
+      <Navigation />
+      {children}
+    </>
+  );
+};
 
-export default App
+const App: React.FC = () => {
+  return (
+    <ChakraProvider theme={theme}>
+      <ColorModeScript initialColorMode={theme.config.initialColorMode} />
+      <AuthProvider>
+        <TaskProvider>
+          <Router>
+            <Routes>
+              <Route path="/login" element={<Login />} />
+              <Route path="/signup" element={<Signup />} />
+              <Route
+                path="/tasks"
+                element={
+                  <ProtectedRoute>
+                    <TaskList />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/tasks/new"
+                element={
+                  <ProtectedRoute>
+                    <TaskInput />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/insights"
+                element={
+                  <ProtectedRoute>
+                    <ProductivityInsights />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/settings"
+                element={
+                  <ProtectedRoute>
+                    <Settings />
+                  </ProtectedRoute>
+                }
+              />
+              <Route path="/" element={<Navigate to="/tasks" replace />} />
+            </Routes>
+          </Router>
+        </TaskProvider>
+      </AuthProvider>
+    </ChakraProvider>
+  );
+};
+
+export default App;
