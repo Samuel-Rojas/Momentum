@@ -11,9 +11,11 @@ import {
   doc,
   onSnapshot,
   Timestamp,
+  getDocs,
 } from 'firebase/firestore'
 import { db } from './firebase'
 import { useAuth } from './AuthContext'
+import { ProductivityService } from './ProductivityService'
 
 export type Priority = 'low' | 'medium' | 'high'
 export type Category = string
@@ -33,6 +35,7 @@ export interface Task {
   tags: string[]
   order: number // For drag and drop ordering
   userId: string
+  completedAt?: string
 }
 
 interface TaskStats {
@@ -55,10 +58,10 @@ interface TaskContextType {
   setSortOrder: (order: SortOrder) => void
   selectedTasks: string[]
   setSelectedTasks: (ids: string[]) => void
-  addTask: (task: Omit<Task, 'id' | 'createdAt' | 'completed' | 'order' | 'userId'>) => void
-  editTask: (id: string, updates: Partial<Task>) => void
-  deleteTask: (id: string) => void
-  toggleTaskComplete: (id: string) => void
+  addTask: (task: Omit<Task, 'id' | 'completed' | 'userId' | 'createdAt'>) => Promise<void>
+  editTask: (id: string, updates: Partial<Task>) => Promise<void>
+  deleteTask: (id: string) => Promise<void>
+  toggleComplete: (id: string) => Promise<void>
   startEditing: (id: string) => void
   stopEditing: (id: string) => void
   batchComplete: (ids: string[]) => void
@@ -68,11 +71,20 @@ interface TaskContextType {
   filteredAndSortedTasks: Task[]
   exportTasks: () => string
   importTasks: (jsonData: string) => void
+  productivityService: ProductivityService
+  hasProductivityInsights: boolean
+  getOptimalTaskOrder: () => Task[]
 }
 
-const TaskContext = createContext<TaskContextType>({} as TaskContextType)
+const TaskContext = createContext<TaskContextType | undefined>(undefined)
 
-export const useTasks = () => useContext(TaskContext)
+export const useTasks = () => {
+  const context = useContext(TaskContext)
+  if (context === undefined) {
+    throw new Error('useTasks must be used within a TaskProvider')
+  }
+  return context
+}
 
 export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth()
@@ -81,64 +93,88 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [sortBy, setSortBy] = useState<SortBy>('createdAt')
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
   const [selectedTasks, setSelectedTasks] = useState<string[]>([])
+  const [productivityService] = useState(() => new ProductivityService())
+  const [hasProductivityInsights, setHasProductivityInsights] = useState(false)
 
   useEffect(() => {
-    if (!user) return
+    if (user) {
+      const fetchTasks = async () => {
+        const q = query(collection(db, 'tasks'), where('userId', '==', user.uid))
+        const querySnapshot = await getDocs(q)
+        const fetchedTasks = querySnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        } as Task))
+        setTasks(fetchedTasks)
 
-    const tasksRef = collection(db, 'tasks')
-    const q = query(
-      tasksRef,
-      where('userId', '==', user.uid)
-    )
+        // Process existing completed tasks for productivity analysis
+        fetchedTasks.forEach(task => {
+          if (task.completed && task.completedAt) {
+            productivityService.addTaskCompletion(task, new Date(task.completedAt))
+          }
+        })
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const tasksData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        createdAt: doc.data().createdAt?.toDate(),
-        dueDate: doc.data().dueDate?.toDate(),
-      })) as Task[]
+        setHasProductivityInsights(productivityService.canProvideInsights())
+      }
 
-      // Sort tasks by order in memory
-      const sortedTasks = tasksData.sort((a, b) => a.order - b.order)
-      setTasks(sortedTasks)
-    })
-
-    return () => unsubscribe()
+      fetchTasks()
+    }
   }, [user])
 
-  const addTask = useCallback(async (task: Omit<Task, 'id' | 'createdAt' | 'completed' | 'order' | 'userId'>) => {
+  const addTask = async (taskData: Omit<Task, 'id' | 'completed' | 'userId' | 'createdAt'>) => {
     if (!user) return
 
-    const tasksRef = collection(db, 'tasks')
     const newTask = {
-      ...task,
+      ...taskData,
       completed: false,
-      order: tasks.length,
-      createdAt: Timestamp.now(),
       userId: user.uid,
+      createdAt: new Date().toISOString()
     }
 
-    await addDoc(tasksRef, newTask)
-  }, [user, tasks.length])
+    const docRef = await addDoc(collection(db, 'tasks'), newTask)
+    const task = { ...newTask, id: docRef.id }
+    setTasks(prev => [...prev, task])
+  }
 
-  const editTask = useCallback(async (id: string, updates: Partial<Task>) => {
+  const editTask = async (id: string, updates: Partial<Task>) => {
     const taskRef = doc(db, 'tasks', id)
     await updateDoc(taskRef, updates)
-  }, [])
+    setTasks(prev =>
+      prev.map(task =>
+        task.id === id ? { ...task, ...updates } : task
+      )
+    )
+  }
 
-  const deleteTask = useCallback(async (id: string) => {
+  const deleteTask = async (id: string) => {
+    await deleteDoc(doc(db, 'tasks', id))
+    setTasks(prev => prev.filter(task => task.id !== id))
+  }
+
+  const toggleComplete = async (id: string) => {
     const taskRef = doc(db, 'tasks', id)
-    await deleteDoc(taskRef)
-  }, [])
-
-  const toggleTaskComplete = useCallback(async (id: string) => {
     const task = tasks.find(t => t.id === id)
     if (!task) return
 
-    const taskRef = doc(db, 'tasks', id)
-    await updateDoc(taskRef, { completed: !task.completed })
-  }, [tasks])
+    const now = new Date()
+    const updates = {
+      completed: !task.completed,
+      completedAt: !task.completed ? now.toISOString() : null
+    }
+
+    await updateDoc(taskRef, updates)
+    
+    if (!task.completed) {
+      productivityService.addTaskCompletion(task, now)
+      setHasProductivityInsights(productivityService.canProvideInsights())
+    }
+
+    setTasks(prev =>
+      prev.map(t =>
+        t.id === id ? { ...t, ...updates } : t
+      )
+    )
+  }
 
   const reorderTasks = useCallback(async (oldIndex: number, newIndex: number) => {
     const newTasks = arrayMove(tasks, oldIndex, newIndex)
@@ -221,6 +257,10 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }
 
+  const getOptimalTaskOrder = () => {
+    return productivityService.getOptimalTaskOrder(tasks)
+  }
+
   const value = {
     tasks,
     searchQuery,
@@ -234,7 +274,7 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
     addTask,
     editTask,
     deleteTask,
-    toggleTaskComplete,
+    toggleComplete,
     startEditing: () => {},
     stopEditing: () => {},
     batchComplete: () => {},
@@ -244,6 +284,9 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
     filteredAndSortedTasks,
     exportTasks,
     importTasks,
+    productivityService,
+    hasProductivityInsights,
+    getOptimalTaskOrder,
   }
 
   return <TaskContext.Provider value={value}>{children}</TaskContext.Provider>

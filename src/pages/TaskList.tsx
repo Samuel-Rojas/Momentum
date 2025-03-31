@@ -49,6 +49,12 @@ import {
   TagCloseButton,
   useToken,
   Container,
+  Menu,
+  MenuButton,
+  MenuList,
+  MenuItem,
+  FlexProps,
+  SimpleGridProps,
 } from '@chakra-ui/react';
 import { motion, AnimatePresence, HTMLMotionProps } from 'framer-motion';
 import { DndContext, DragEndEvent, DragOverlay, closestCenter, useSensor, useSensors, PointerSensor } from '@dnd-kit/core';
@@ -57,10 +63,16 @@ import { useTasks } from '../utils/TaskContext';
 import SortableTask from '../components/task/SortableTask';
 import { RiSearchLine, RiFilter3Line, RiAddLine } from 'react-icons/ri';
 import { useNavigate } from 'react-router-dom';
+import { FiPlus, FiFilter } from 'react-icons/fi';
 
-const MotionBox = motion(Box) as React.FC<HTMLMotionProps<"div">>;
-const MotionVStack = motion(VStack) as React.FC<HTMLMotionProps<"div">>;
-const MotionButton = motion(Button) as React.FC<HTMLMotionProps<"button">>;
+type Merge<P, T> = Omit<P, keyof T> & T;
+type MotionBoxProps = Merge<HTMLMotionProps<"div">, FlexProps>;
+type MotionSimpleGridProps = Merge<HTMLMotionProps<"div">, SimpleGridProps>;
+
+const MotionBox = motion(Box);
+const MotionFlex = motion(Flex) as React.FC<MotionBoxProps>;
+const MotionSimpleGrid = motion(SimpleGrid) as React.FC<MotionSimpleGridProps>;
+const MotionBadge = motion(Badge);
 
 type View = 'list' | 'timeline' | 'stats';
 type SortBy = 'createdAt' | 'dueDate' | 'priority' | 'title';
@@ -72,7 +84,7 @@ interface FilterOptions {
   status: 'all' | 'completed' | 'pending';
 }
 
-const TaskList: React.FC = () => {
+export const TaskList: React.FC = () => {
   const navigate = useNavigate();
   const toast = useToast();
   const { colorMode } = useColorMode();
@@ -83,8 +95,8 @@ const TaskList: React.FC = () => {
   const mutedColor = useColorModeValue('gray.600', 'gray.300');
   const hoverBgColor = useColorModeValue('gray.50', 'gray.700');
   const gradientBg = useColorModeValue(
-    'linear-gradient(135deg, #f6f8fb 0%, #ffffff 100%)',
-    'linear-gradient(135deg, #2d3748 0%, #1a202c 100%)'
+    'linear-gradient(135deg, #E3F2FD 0%, #BBDEFB 100%)',
+    'linear-gradient(135deg, #1A365D 0%, #2C5282 100%)'
   );
   const filterBgColor = useColorModeValue('gray.50', 'gray.700');
   const filterBorderColor = useColorModeValue('gray.200', 'gray.600');
@@ -95,7 +107,16 @@ const TaskList: React.FC = () => {
   const statTextColor = useColorModeValue('gray.700', 'white');
   const statMutedColor = useColorModeValue('gray.500', 'gray.400');
 
-  const { tasks, addTask, deleteTask, toggleTaskComplete, reorderTasks } = useTasks();
+  const {
+    tasks,
+    addTask,
+    deleteTask,
+    toggleComplete,
+    reorderTasks,
+    productivityService,
+    hasProductivityInsights,
+    getOptimalTaskOrder
+  } = useTasks();
   const [view, setView] = useState<View>('list');
   const [filters, setFilters] = useState<FilterOptions>({
     search: '',
@@ -107,6 +128,7 @@ const TaskList: React.FC = () => {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [activeId, setActiveId] = useState<string | null>(null);
   const [categories] = useState(['Work', 'Personal', 'Study', 'Health', 'Shopping', 'Other']);
+  const [filter, setFilter] = useState('all');
 
   const pointerSensor = useSensor(PointerSensor);
   const sensors = useSensors(pointerSensor);
@@ -156,157 +178,233 @@ const TaskList: React.FC = () => {
     }));
   };
 
+  const filterTasks = () => {
+    let filteredTasks = [...tasks];
+    if (filter === 'completed') {
+      filteredTasks = tasks.filter(task => task.completed);
+    } else if (filter === 'pending') {
+      filteredTasks = tasks.filter(task => !task.completed);
+    }
+    return filteredTasks;
+  };
+
+  const containerVariants = {
+    hidden: { opacity: 0 },
+    visible: {
+      opacity: 1,
+      transition: {
+        staggerChildren: 0.1
+      }
+    }
+  };
+
+  const itemVariants = {
+    hidden: { opacity: 0, y: 20 },
+    visible: { opacity: 1, y: 0 }
+  };
+
+  const statVariants = {
+    hidden: { opacity: 0, scale: 0.8 },
+    visible: { 
+      opacity: 1, 
+      scale: 1,
+      transition: {
+        type: "spring",
+        stiffness: 200,
+        damping: 20
+      }
+    }
+  };
+
   return (
     <Box
       minH="100vh"
-      bg={useColorModeValue('gray.50', 'gray.900')}
-      pt="60px"
+      bgGradient={gradientBg}
+      py={12}
+      px={4}
     >
-      <Container maxW="container.xl" py={8}>
-        <VStack spacing={8} align="stretch" maxW="1200px" mx="auto">
-          <Flex justify="space-between" align="center">
-            <Heading size="lg" color={textColor}>Tasks</Heading>
-            <Button
-              leftIcon={<RiAddLine />}
-              colorScheme="blue"
-              onClick={() => navigate('/tasks/new')}
-              size="md"
-              fontWeight="semibold"
+      <Container maxW="1200px">
+        <MotionBox
+          variants={containerVariants}
+          initial="hidden"
+          animate="visible"
+        >
+          <VStack spacing={8} align="stretch">
+            <MotionFlex
+              justify="space-between"
+              align="center"
+              variants={itemVariants}
             >
-              Add Task
-            </Button>
-          </Flex>
-
-          <Box
-            bg={filterBgColor}
-            p={4}
-            borderRadius="lg"
-            borderWidth="1px"
-            borderColor={filterBorderColor}
-          >
-            <VStack spacing={4} align="stretch">
-              <InputGroup>
-                <InputLeftElement pointerEvents="none">
-                  <RiSearchLine color={filterPlaceholderColor} />
-                </InputLeftElement>
-                <Input
-                  placeholder="Search tasks..."
-                  value={filters.search}
-                  onChange={(e) => handleFilterChange('search', e.target.value)}
-                  bg={bgColor}
-                  borderColor={borderColor}
-                  _hover={{ borderColor: 'blue.400' }}
-                  _focus={{ borderColor: 'blue.500' }}
-                />
-              </InputGroup>
-
-              <SimpleGrid columns={{ base: 1, md: 3 }} spacing={4}>
-                <Select
-                  value={filters.priority}
-                  onChange={(e) => handleFilterChange('priority', e.target.value)}
-                  bg={bgColor}
-                  borderColor={borderColor}
-                  _hover={{ borderColor: 'blue.400' }}
-                  _focus={{ borderColor: 'blue.500' }}
-                >
-                  <option value="all">All Priorities</option>
-                  <option value="high">High</option>
-                  <option value="medium">Medium</option>
-                  <option value="low">Low</option>
-                </Select>
-
-                <Select
-                  value={filters.category}
-                  onChange={(e) => handleFilterChange('category', e.target.value)}
-                  bg={bgColor}
-                  borderColor={borderColor}
-                  _hover={{ borderColor: 'blue.400' }}
-                  _focus={{ borderColor: 'blue.500' }}
-                >
-                  <option value="all">All Categories</option>
-                  {categories.map((category) => (
-                    <option key={category} value={category}>
-                      {category}
-                    </option>
-                  ))}
-                </Select>
-
-                <Select
-                  value={filters.status}
-                  onChange={(e) => handleFilterChange('status', e.target.value)}
-                  bg={bgColor}
-                  borderColor={borderColor}
-                  _hover={{ borderColor: 'blue.400' }}
-                  _focus={{ borderColor: 'blue.500' }}
-                >
-                  <option value="all">All Status</option>
-                  <option value="completed">Completed</option>
-                  <option value="pending">Pending</option>
-                </Select>
-              </SimpleGrid>
-            </VStack>
-          </Box>
-
-          <StatGroup>
-            <Stat
-              bg={statBgColor}
-              p={4}
-              borderRadius="lg"
-              borderWidth="1px"
-              borderColor={statBorderColor}
-            >
-              <StatLabel color={statTextColor}>Total Tasks</StatLabel>
-              <StatNumber color={statTextColor}>{filteredTasks.length}</StatNumber>
-              <StatHelpText color={statMutedColor}>
-                {filteredTasks.length === tasks.length ? 'All tasks' : 'Filtered tasks'}
-              </StatHelpText>
-            </Stat>
-
-            <Stat
-              bg={statBgColor}
-              p={4}
-              borderRadius="lg"
-              borderWidth="1px"
-              borderColor={statBorderColor}
-            >
-              <StatLabel color={statTextColor}>Completed</StatLabel>
-              <StatNumber color={statTextColor}>
-                {filteredTasks.filter((task) => task.completed).length}
-              </StatNumber>
-              <StatHelpText color={statMutedColor}>
-                {((filteredTasks.filter((task) => task.completed).length / filteredTasks.length) * 100).toFixed(1)}% completion rate
-              </StatHelpText>
-            </Stat>
-          </StatGroup>
-
-          <Box
-            bg={bgColor}
-            p={6}
-            borderRadius="lg"
-            borderWidth="1px"
-            borderColor={borderColor}
-          >
-            <DndContext
-              sensors={sensors}
-              collisionDetection={closestCenter}
-              onDragEnd={handleDragEnd}
-            >
-              <SortableContext items={filteredTasks.map((task) => task.id)}>
-                <VStack spacing={4} align="stretch">
-                  {filteredTasks.map((task) => (
-                    <SortableTask
-                      key={task.id}
-                      task={task}
-                      onComplete={toggleTaskComplete}
-                      onDelete={deleteTask}
-                      onEdit={(id: string) => navigate(`/tasks/edit/${id}`)}
+              <Heading size="lg" color={textColor}>Tasks</Heading>
+              <HStack spacing={4}>
+                <Menu>
+                  <Tooltip label="Filter tasks">
+                    <MenuButton
+                      as={IconButton}
+                      icon={<FiFilter />}
+                      variant="ghost"
+                      aria-label="Filter tasks"
+                      _hover={{ transform: 'translateY(-2px)' }}
+                      style={{ transition: 'all 0.2s' }}
                     />
-                  ))}
-                </VStack>
-              </SortableContext>
-            </DndContext>
-          </Box>
-        </VStack>
+                  </Tooltip>
+                  <MenuList>
+                    <MenuItem onClick={() => setFilter('all')}>All Tasks</MenuItem>
+                    <MenuItem onClick={() => setFilter('completed')}>Completed</MenuItem>
+                    <MenuItem onClick={() => setFilter('pending')}>Pending</MenuItem>
+                  </MenuList>
+                </Menu>
+                <Button
+                  leftIcon={<FiPlus />}
+                  colorScheme="blue"
+                  onClick={() => navigate('/tasks/new')}
+                  size="md"
+                  px={6}
+                  fontWeight="semibold"
+                  _hover={{
+                    transform: 'translateY(-2px)',
+                    boxShadow: 'lg',
+                  }}
+                  _active={{
+                    transform: 'translateY(0)',
+                  }}
+                  style={{ transition: 'all 0.2s' }}
+                >
+                  Add Task
+                </Button>
+              </HStack>
+            </MotionFlex>
+
+            <MotionSimpleGrid
+              columns={{ base: 1, md: 3 }}
+              spacing={6}
+              variants={itemVariants}
+            >
+              <MotionBox
+                variants={statVariants}
+                bg={statBgColor}
+                p={6}
+                borderRadius="xl"
+                borderWidth="1px"
+                borderColor={statBorderColor}
+                boxShadow="sm"
+                _hover={{
+                  transform: 'translateY(-2px)',
+                  boxShadow: 'md',
+                }}
+                style={{ transition: 'all 0.2s' }}
+              >
+                <Stat>
+                  <StatLabel color={mutedColor}>Total Tasks</StatLabel>
+                  <StatNumber color={textColor}>{totalTasks}</StatNumber>
+                  <StatHelpText>All tasks</StatHelpText>
+                </Stat>
+              </MotionBox>
+
+              <MotionBox
+                variants={statVariants}
+                bg={statBgColor}
+                p={6}
+                borderRadius="xl"
+                borderWidth="1px"
+                borderColor={statBorderColor}
+                boxShadow="sm"
+                _hover={{
+                  transform: 'translateY(-2px)',
+                  boxShadow: 'md',
+                }}
+                style={{ transition: 'all 0.2s' }}
+              >
+                <Stat>
+                  <StatLabel color={mutedColor}>Completed</StatLabel>
+                  <StatNumber color="green.500">{completedTasks}</StatNumber>
+                  <StatHelpText>
+                    <StatArrow type={completedTasks > 0 ? 'increase' : 'decrease'} />
+                    {completionRate}% completion rate
+                  </StatHelpText>
+                </Stat>
+              </MotionBox>
+
+              <MotionBox
+                variants={statVariants}
+                bg={statBgColor}
+                p={6}
+                borderRadius="xl"
+                borderWidth="1px"
+                borderColor={statBorderColor}
+                boxShadow="sm"
+                _hover={{
+                  transform: 'translateY(-2px)',
+                  boxShadow: 'md',
+                }}
+                style={{ transition: 'all 0.2s' }}
+              >
+                <Stat>
+                  <StatLabel color={mutedColor}>Pending</StatLabel>
+                  <StatNumber color="orange.500">{totalTasks - completedTasks}</StatNumber>
+                  <StatHelpText>Tasks to complete</StatHelpText>
+                </Stat>
+              </MotionBox>
+            </MotionSimpleGrid>
+
+            <AnimatePresence mode="wait">
+              <MotionBox
+                variants={itemVariants}
+                bg={bgColor}
+                p={6}
+                borderRadius="xl"
+                borderWidth="1px"
+                borderColor={borderColor}
+                boxShadow="sm"
+              >
+                <DndContext
+                  sensors={sensors}
+                  collisionDetection={closestCenter}
+                  onDragEnd={handleDragEnd}
+                >
+                  <SortableContext
+                    items={filterTasks().map(task => task.id)}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    <VStack spacing={4} align="stretch">
+                      <AnimatePresence>
+                        {filterTasks().map((task, index) => (
+                          <MotionBox
+                            key={task.id}
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -20 }}
+                            transition={{
+                              duration: 0.2,
+                              delay: index * 0.1
+                            }}
+                          >
+                            <SortableTask
+                              task={task}
+                              onDelete={deleteTask}
+                              onComplete={toggleComplete}
+                              onEdit={(id) => navigate(`/tasks/edit/${id}`)}
+                            />
+                          </MotionBox>
+                        ))}
+                      </AnimatePresence>
+                      {filterTasks().length === 0 && (
+                        <MotionBox
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          textAlign="center"
+                          py={8}
+                        >
+                          <Text color={mutedColor}>No tasks found</Text>
+                        </MotionBox>
+                      )}
+                    </VStack>
+                  </SortableContext>
+                </DndContext>
+              </MotionBox>
+            </AnimatePresence>
+          </VStack>
+        </MotionBox>
       </Container>
     </Box>
   );

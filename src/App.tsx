@@ -12,7 +12,9 @@ import TaskList from './pages/TaskList';
 import TaskInput from './pages/TaskInput';
 import ProductivityInsights from './components/ProductivityInsights';
 import Settings from './pages/Settings';
-import { Navigation } from './components/Navigation';
+import Welcome from './pages/Welcome';
+import Layout from './components/Layout';
+import { Profile } from './pages/Profile';
 
 // Protected Route wrapper
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -23,15 +25,10 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
   }
 
   if (!user) {
-    return <Navigate to="/login" />;
+    return <Navigate to="/welcome" />;
   }
 
-  return (
-    <>
-      <Navigation />
-      {children}
-    </>
-  );
+  return <Layout>{children}</Layout>;
 };
 
 const App: React.FC = () => {
@@ -42,6 +39,7 @@ const App: React.FC = () => {
         <TaskProvider>
           <Router>
             <Routes>
+              <Route path="/welcome" element={<Welcome />} />
               <Route path="/login" element={<Login />} />
               <Route path="/signup" element={<Signup />} />
               <Route
@@ -76,7 +74,15 @@ const App: React.FC = () => {
                   </ProtectedRoute>
                 }
               />
-              <Route path="/" element={<Navigate to="/tasks" replace />} />
+              <Route
+                path="/profile"
+                element={
+                  <ProtectedRoute>
+                    <Profile />
+                  </ProtectedRoute>
+                }
+              />
+              <Route path="/" element={<Navigate to="/welcome" replace />} />
             </Routes>
           </Router>
         </TaskProvider>

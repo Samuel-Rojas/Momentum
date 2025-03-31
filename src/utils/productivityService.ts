@@ -109,4 +109,142 @@ export const getProductivityRecommendations = (data: ProductivityData): string[]
   }
 
   return recommendations;
-}; 
+};
+
+interface ProductivityMetrics {
+  timeOfDay: string;
+  dayOfWeek: string;
+  category: string;
+  priority: string;
+  completionDuration: number; // in minutes
+}
+
+interface ProductivityPattern {
+  mostProductiveTimeOfDay: string;
+  mostProductiveDayOfWeek: string;
+  bestCategories: string[];
+  averageTaskDuration: number;
+  recommendedTaskOrder: string[];
+}
+
+export class ProductivityService {
+  private static MINIMUM_TASKS_FOR_ANALYSIS = 5;
+  private metrics: ProductivityMetrics[] = [];
+  private pattern: ProductivityPattern | null = null;
+
+  addTaskCompletion(task: Task, completedAt: Date): void {
+    const startTime = task.createdAt ? new Date(task.createdAt) : new Date();
+    const completionTime = completedAt;
+    
+    const metrics: ProductivityMetrics = {
+      timeOfDay: this.getTimeOfDayCategory(completionTime),
+      dayOfWeek: completionTime.toLocaleDateString('en-US', { weekday: 'long' }),
+      category: task.category,
+      priority: task.priority,
+      completionDuration: Math.round((completionTime.getTime() - startTime.getTime()) / (1000 * 60))
+    };
+
+    this.metrics.push(metrics);
+    
+    if (this.metrics.length >= ProductivityService.MINIMUM_TASKS_FOR_ANALYSIS) {
+      this.analyzeProductivityPatterns();
+    }
+  }
+
+  private getTimeOfDayCategory(date: Date): string {
+    const hour = date.getHours();
+    if (hour >= 5 && hour < 12) return 'Morning';
+    if (hour >= 12 && hour < 17) return 'Afternoon';
+    if (hour >= 17 && hour < 22) return 'Evening';
+    return 'Night';
+  }
+
+  private analyzeProductivityPatterns(): void {
+    const timeOfDayFrequency: { [key: string]: number } = {};
+    const dayOfWeekFrequency: { [key: string]: number } = {};
+    const categoryDurations: { [key: string]: number[] } = {};
+    let totalDuration = 0;
+
+    // Analyze completion patterns
+    this.metrics.forEach(metric => {
+      timeOfDayFrequency[metric.timeOfDay] = (timeOfDayFrequency[metric.timeOfDay] || 0) + 1;
+      dayOfWeekFrequency[metric.dayOfWeek] = (dayOfWeekFrequency[metric.dayOfWeek] || 0) + 1;
+      
+      if (!categoryDurations[metric.category]) {
+        categoryDurations[metric.category] = [];
+      }
+      categoryDurations[metric.category].push(metric.completionDuration);
+      totalDuration += metric.completionDuration;
+    });
+
+    // Find most productive time of day
+    const mostProductiveTimeOfDay = Object.entries(timeOfDayFrequency)
+      .sort((a, b) => b[1] - a[1])[0][0];
+
+    // Find most productive day of week
+    const mostProductiveDayOfWeek = Object.entries(dayOfWeekFrequency)
+      .sort((a, b) => b[1] - a[1])[0][0];
+
+    // Calculate average durations by category
+    const categoryEfficiency: { [key: string]: number } = {};
+    Object.entries(categoryDurations).forEach(([category, durations]) => {
+      categoryEfficiency[category] = durations.reduce((a, b) => a + b, 0) / durations.length;
+    });
+
+    // Sort categories by efficiency
+    const bestCategories = Object.entries(categoryEfficiency)
+      .sort((a, b) => a[1] - b[1])
+      .map(([category]) => category);
+
+    this.pattern = {
+      mostProductiveTimeOfDay,
+      mostProductiveDayOfWeek,
+      bestCategories,
+      averageTaskDuration: totalDuration / this.metrics.length,
+      recommendedTaskOrder: this.generateRecommendedTaskOrder(bestCategories)
+    };
+  }
+
+  private generateRecommendedTaskOrder(bestCategories: string[]): string[] {
+    // Combine time of day and category preferences
+    const timeSlots = ['Morning', 'Afternoon', 'Evening', 'Night'];
+    const recommendedOrder: string[] = [];
+    
+    // Map categories to optimal time slots based on patterns
+    timeSlots.forEach(timeSlot => {
+      bestCategories.forEach(category => {
+        if (timeSlot === this.pattern?.mostProductiveTimeOfDay) {
+          recommendedOrder.push(`${timeSlot}-${category}`);
+        }
+      });
+    });
+
+    return recommendedOrder;
+  }
+
+  getProductivityInsights(): ProductivityPattern | null {
+    return this.pattern;
+  }
+
+  canProvideInsights(): boolean {
+    return this.metrics.length >= ProductivityService.MINIMUM_TASKS_FOR_ANALYSIS;
+  }
+
+  getOptimalTaskOrder(tasks: Task[]): Task[] {
+    if (!this.pattern) return tasks;
+
+    return [...tasks].sort((a, b) => {
+      const aIndex = this.pattern!.recommendedTaskOrder.findIndex(
+        order => order.includes(a.category)
+      );
+      const bIndex = this.pattern!.recommendedTaskOrder.findIndex(
+        order => order.includes(b.category)
+      );
+      
+      if (aIndex === -1 && bIndex === -1) return 0;
+      if (aIndex === -1) return 1;
+      if (bIndex === -1) return -1;
+      return aIndex - bIndex;
+    });
+  }
+} 

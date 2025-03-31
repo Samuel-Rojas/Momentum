@@ -1,204 +1,132 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import {
   Box,
   VStack,
   Heading,
   Text,
-  Stat,
-  StatLabel,
-  StatNumber,
-  StatHelpText,
-  StatGroup,
-  useColorModeValue,
   SimpleGrid,
   Card,
   CardBody,
   List,
   ListItem,
   ListIcon,
-  Icon,
-  Spinner,
+  Alert,
+  AlertIcon,
+  useColorModeValue,
 } from '@chakra-ui/react';
-import { useAuth } from '../utils/AuthContext';
-import { analyzeProductivity, getProductivityRecommendations, ProductivityData } from '../utils/productivityService';
-import { RiTimeLine, RiCalendarLine, RiLightbulbLine, RiCheckLine } from 'react-icons/ri';
+import { FiClock, FiCalendar, FiTag, FiTrendingUp } from 'react-icons/fi';
+import { useTasks } from '../utils/TaskContext';
+import { motion } from 'framer-motion';
+
+const MotionBox = motion(Box);
 
 const ProductivityInsights: React.FC = () => {
-  const { user } = useAuth();
-  const [data, setData] = useState<ProductivityData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
+  const { productivityService, hasProductivityInsights } = useTasks();
+  const insights = productivityService.getProductivityInsights();
+  
   const bgColor = useColorModeValue('white', 'gray.800');
-  const borderColor = useColorModeValue('gray.200', 'gray.600');
-  const textColor = useColorModeValue('gray.700', 'white');
-  const mutedColor = useColorModeValue('gray.500', 'gray.400');
+  const borderColor = useColorModeValue('gray.200', 'gray.700');
+  const textColor = useColorModeValue('gray.700', 'gray.200');
 
-  useEffect(() => {
-    const fetchData = async () => {
-      if (!user) return;
-
-      try {
-        setLoading(true);
-        const productivityData = await analyzeProductivity(user.uid);
-        setData(productivityData);
-      } catch (err) {
-        setError('Failed to load productivity data');
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchData();
-  }, [user]);
-
-  if (loading) {
+  if (!hasProductivityInsights) {
     return (
-      <Box display="flex" justifyContent="center" alignItems="center" minH="200px">
-        <Spinner size="xl" />
+      <Box p={8}>
+        <Alert status="info" borderRadius="lg">
+          <AlertIcon />
+          Complete at least 5 tasks to generate productivity insights. We'll analyze your patterns to help optimize your task scheduling.
+        </Alert>
       </Box>
     );
   }
-
-  if (error) {
-    return (
-      <Box p={4}>
-        <Text color="red.500">{error}</Text>
-      </Box>
-    );
-  }
-
-  if (!data) {
-    return (
-      <Box p={4}>
-        <Text color={mutedColor}>No productivity data available yet.</Text>
-      </Box>
-    );
-  }
-
-  const recommendations = getProductivityRecommendations(data);
-  const avgHours = data.averageCompletionTime / (1000 * 60 * 60);
 
   return (
-    <VStack spacing={6} align="stretch">
-      <Heading size="lg" color={textColor}>Productivity Insights</Heading>
-
-      <StatGroup>
-        <Stat
-          bg={bgColor}
-          p={4}
-          borderRadius="lg"
-          borderWidth="1px"
-          borderColor={borderColor}
-        >
-          <StatLabel color={textColor}>Most Productive Hour</StatLabel>
-          <StatNumber color={textColor}>
-            {data.mostProductiveHour}:00
-          </StatNumber>
-          <StatHelpText color={mutedColor}>
-            {data.mostProductiveHour >= 12 ? 'PM' : 'AM'}
-          </StatHelpText>
-        </Stat>
-
-        <Stat
-          bg={bgColor}
-          p={4}
-          borderRadius="lg"
-          borderWidth="1px"
-          borderColor={borderColor}
-        >
-          <StatLabel color={textColor}>Most Productive Day</StatLabel>
-          <StatNumber color={textColor}>
-            {data.mostProductiveDay}
-          </StatNumber>
-          <StatHelpText color={mutedColor}>
-            Based on task completion
-          </StatHelpText>
-        </Stat>
-
-        <Stat
-          bg={bgColor}
-          p={4}
-          borderRadius="lg"
-          borderWidth="1px"
-          borderColor={borderColor}
-        >
-          <StatLabel color={textColor}>Avg. Completion Time</StatLabel>
-          <StatNumber color={textColor}>
-            {avgHours.toFixed(1)}h
-          </StatNumber>
-          <StatHelpText color={mutedColor}>
-            Per task
-          </StatHelpText>
-        </Stat>
-      </StatGroup>
-
-      <SimpleGrid columns={{ base: 1, md: 2 }} spacing={6}>
-        <Card bg={bgColor} borderWidth="1px" borderColor={borderColor}>
-          <CardBody>
-            <VStack align="start" spacing={4}>
-              <Heading size="md" color={textColor}>
-                <Icon as={RiTimeLine} mr={2} />
-                Hourly Productivity
-              </Heading>
-              <List spacing={2}>
-                {Object.entries(data.completionRateByHour)
-                  .sort(([, a], [, b]) => b - a)
-                  .slice(0, 3)
-                  .map(([hour, rate]) => (
-                    <ListItem key={hour} color={textColor}>
-                      <ListIcon as={RiCheckLine} color="green.500" />
-                      {parseInt(hour)}:00 - {(rate * 100).toFixed(1)}% completion rate
+    <Box p={8}>
+      <VStack spacing={8} align="stretch">
+        <Heading size="lg" color={textColor}>Your Productivity Insights</Heading>
+        
+        <SimpleGrid columns={{ base: 1, md: 2 }} spacing={6}>
+          <MotionBox
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+          >
+            <Card bg={bgColor} borderColor={borderColor} borderWidth="1px">
+              <CardBody>
+                <VStack align="start" spacing={4}>
+                  <Heading size="md" color={textColor}>
+                    Peak Performance Times
+                  </Heading>
+                  <List spacing={3}>
+                    <ListItem display="flex" alignItems="center">
+                      <ListIcon as={FiClock} color="blue.500" />
+                      Most Productive Time: {insights?.mostProductiveTimeOfDay}
                     </ListItem>
-                  ))}
-              </List>
-            </VStack>
-          </CardBody>
-        </Card>
-
-        <Card bg={bgColor} borderWidth="1px" borderColor={borderColor}>
-          <CardBody>
-            <VStack align="start" spacing={4}>
-              <Heading size="md" color={textColor}>
-                <Icon as={RiCalendarLine} mr={2} />
-                Daily Productivity
-              </Heading>
-              <List spacing={2}>
-                {Object.entries(data.completionRateByDay)
-                  .sort(([, a], [, b]) => b - a)
-                  .slice(0, 3)
-                  .map(([day, rate]) => (
-                    <ListItem key={day} color={textColor}>
-                      <ListIcon as={RiCheckLine} color="green.500" />
-                      {day} - {(rate * 100).toFixed(1)}% completion rate
+                    <ListItem display="flex" alignItems="center">
+                      <ListIcon as={FiCalendar} color="blue.500" />
+                      Best Day: {insights?.mostProductiveDayOfWeek}
                     </ListItem>
-                  ))}
-              </List>
-            </VStack>
-          </CardBody>
-        </Card>
-      </SimpleGrid>
+                  </List>
+                </VStack>
+              </CardBody>
+            </Card>
+          </MotionBox>
 
-      <Card bg={bgColor} borderWidth="1px" borderColor={borderColor}>
-        <CardBody>
-          <VStack align="start" spacing={4}>
-            <Heading size="md" color={textColor}>
-              <Icon as={RiLightbulbLine} mr={2} />
-              Personalized Recommendations
-            </Heading>
-            <List spacing={2}>
-              {recommendations.map((recommendation, index) => (
-                <ListItem key={index} color={textColor}>
-                  <ListIcon as={RiCheckLine} color="blue.500" />
-                  {recommendation}
-                </ListItem>
-              ))}
-            </List>
-          </VStack>
-        </CardBody>
-      </Card>
-    </VStack>
+          <MotionBox
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, delay: 0.2 }}
+          >
+            <Card bg={bgColor} borderColor={borderColor} borderWidth="1px">
+              <CardBody>
+                <VStack align="start" spacing={4}>
+                  <Heading size="md" color={textColor}>
+                    Task Categories
+                  </Heading>
+                  <List spacing={3}>
+                    {insights?.bestCategories.map((category, index) => (
+                      <ListItem key={category} display="flex" alignItems="center">
+                        <ListIcon as={FiTag} color="blue.500" />
+                        {category} {index === 0 && '(Most Efficient)'}
+                      </ListItem>
+                    ))}
+                  </List>
+                </VStack>
+              </CardBody>
+            </Card>
+          </MotionBox>
+        </SimpleGrid>
+
+        <MotionBox
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.4 }}
+        >
+          <Card bg={bgColor} borderColor={borderColor} borderWidth="1px">
+            <CardBody>
+              <VStack align="start" spacing={4}>
+                <Heading size="md" color={textColor}>
+                  Recommendations
+                </Heading>
+                <List spacing={3}>
+                  <ListItem display="flex" alignItems="center">
+                    <ListIcon as={FiTrendingUp} color="blue.500" />
+                    Average Task Duration: {Math.round(insights?.averageTaskDuration || 0)} minutes
+                  </ListItem>
+                  <ListItem display="flex" alignItems="center">
+                    <ListIcon as={FiClock} color="blue.500" />
+                    Schedule {insights?.bestCategories[0]} tasks during your peak time ({insights?.mostProductiveTimeOfDay})
+                  </ListItem>
+                  <ListItem display="flex" alignItems="center">
+                    <ListIcon as={FiCalendar} color="blue.500" />
+                    Plan important tasks for {insights?.mostProductiveDayOfWeek}
+                  </ListItem>
+                </List>
+              </VStack>
+            </CardBody>
+          </Card>
+        </MotionBox>
+      </VStack>
+    </Box>
   );
 };
 
